@@ -54,7 +54,7 @@ class MCUTransport {
         this._rawMessageCallback = callback;
         return this;
     }
-    disconnect() {
+    async disconnect() {
         this._userRequestedDisconnect = true;
     }
     async _connected() {
@@ -132,9 +132,9 @@ class MCUTransportBluetooth extends MCUTransport {
             }
         }, 1000);
     }
-    disconnect() {
-        super.disconnect();
-        return this._device.gatt.disconnect();
+    async disconnect() {
+        await super.disconnect();
+        await this._device.gatt.disconnect();
     }
     async _disconnected() {
         super._disconnected()
@@ -369,15 +369,17 @@ class MCUTransportSerial extends MCUTransport{
         try {
             this._port = await navigator.serial.requestPort(filters);
             this._logger.info(`Connecting to device ${this.name}...`);
-            navigator.serial.addEventListener('disconnect', async event => {
-                this._logger.info(event);
-                if (!this._userRequestedDisconnect) {
-                    this._logger.info('Trying to reconnect');
-                    this._connect(1000);
-                } else {
-                    this._disconnected();
-                }
-            });
+            if (this._port) {
+                this._port.addEventListener('disconnect', async event => {
+                    this._logger.info(event);
+                    if (!this._userRequestedDisconnect) {
+                        this._logger.info('Trying to reconnect');
+                        this._connect(1000);
+                    } else {
+                        this._disconnected();
+                    }
+                });
+            }
             this._connect(0);
         } catch (error) {
             this._logger.error(error);
@@ -396,9 +398,9 @@ class MCUTransportSerial extends MCUTransport{
                 this._logger.info(`Port opened.`);
                 this._inputStream = new TransformStream(new LineTransformer())
                 this._inputStreamClosed = this._port.readable.pipeTo(this._inputStream.writable);
-                this._reader = this._inputStream.readable
-                    .pipeThrough(new TransformStream(new ConsoleDeframerTransformer()))
-                    .getReader()
+                this._messageStream = new TransformStream(new ConsoleDeframerTransformer());
+                this._messageStreamClosed = this._inputStream.readable.pipeTo(this._messageStream.writable);
+                this._reader = this._messageStream.readable.getReader();
                 this._readIncoming(this._reader)
                 this._writer = this._port.writable.getWriter();
                 await this._connected();
@@ -410,22 +412,28 @@ class MCUTransportSerial extends MCUTransport{
     }
     async _disconnected() {
         super._disconnected()
-        this._device = null;
-        this._service = null;
-        this._characteristic = null;
+        this._port = null;
+        this._inputStream = null;
+        this._inputStreamClosed = null;
+        this._messageStream = null;
+        this._messageStreamClosed = null;
+        this._reader = null;
+        this._writer = null;
     }
-    disconnect() {
-        super.disconnect();
+    async disconnect() {
+        await super.disconnect();
         if (this._reader) {
             this._reader.cancel();
+            await this._inputStreamClosed.catch(reason => {});
+            await this._messageStreamClosed.catch(reason => {});
         }
         if (this._writer) {
-            this._writer.close();
+            await this._writer.close();
         }
         if (this._port) {
-            this._port.close();
+            await this._port.close();
         }
-        return this._port.close();
+        await this._disconnected();
     }
     get name() {
         return "Serial";

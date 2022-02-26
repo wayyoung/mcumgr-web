@@ -197,7 +197,7 @@ connectButtonSerial.addEventListener('click', async () => {
 });
 
 disconnectButton.addEventListener('click', async () => {
-    mcumgr.disconnect();
+    await mcumgr.disconnect();
 });
 
 echoButton.addEventListener('click', async () => {
