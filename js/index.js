@@ -1,3 +1,5 @@
+document.addEventListener('DOMContentLoaded', async event => {
+
 const screens = {
     initial: document.getElementById('initial-screen'),
     connecting: document.getElementById('connecting-screen'),
@@ -6,7 +8,8 @@ const screens = {
 
 const deviceName = document.getElementById('device-name');
 const deviceNameInput = document.getElementById('device-name-input');
-const connectButton = document.getElementById('button-connect');
+const connectButtonBluetooth = document.getElementById('button-connect-bluetooth');
+const connectButtonSerial = document.getElementById('button-connect-serial');
 const echoButton = document.getElementById('button-echo');
 const disconnectButton = document.getElementById('button-disconnect');
 const resetButton = document.getElementById('button-reset');
@@ -19,17 +22,38 @@ const fileInfo = document.getElementById('file-info');
 const fileStatus = document.getElementById('file-status');
 const fileImage = document.getElementById('file-image');
 const fileUpload = document.getElementById('file-upload');
-const bluetoothIsAvailable = document.getElementById('bluetooth-is-available');
-const bluetoothIsAvailableMessage = document.getElementById('bluetooth-is-available-message');
-const connectBlock = document.getElementById('connect-block');
+const transportIsAvailable = document.getElementById('transport-is-available');
+const transportIsAvailableMessage = document.getElementById('transport-is-available-message');
+const connectBlockBluetooth = document.getElementById('connect-block-bluetooth');
+const connectBlockSerial = document.getElementById('connect-block-serial');
 
-if (navigator && navigator.bluetooth && navigator.bluetooth.getAvailability()) {
-    bluetoothIsAvailableMessage.innerText = 'Bluetooth is available in your browser.';
-    bluetoothIsAvailable.className = 'alert alert-success';
-    connectBlock.style.display = 'block';
+let bluetoothAvailable = false
+if (navigator && navigator.bluetooth) {
+    bluetoothAvailable = await navigator.bluetooth.getAvailability();
+}
+
+let serialAvailable = false;
+if (navigator && navigator.serial) {
+    serialAvailable = true;
+}
+
+if (bluetoothAvailable && serialAvailable) {
+    transportIsAvailableMessage.innerText = 'Bluetooth and serial are available in your browser.';
+    transportIsAvailable.className = 'alert alert-success';
+    connectBlockBluetooth.style.display = 'block';
+    connectBlockSerial.style.display = 'block';
+} else if (bluetoothAvailable ^ serialAvailable) {
+    if (bluetoothAvailable) {
+        transportIsAvailableMessage.innerText = `Bluetooth is available in your browser, but serial is not.`;
+        connectBlockBluetooth.style.display = 'block';
+    } else {
+        transportIsAvailableMessage.innerText = `Serial is available in your browser, but Bluetooth is not.`;
+        connectBlockSerial.style.display = 'block';
+    }
+    transportIsAvailable.className = 'alert alert-warning';
 } else {
-    bluetoothIsAvailable.className = 'alert alert-danger';
-    bluetoothIsAvailableMessage.innerText = 'Bluetooth is not available in your browser.';
+    transportIsAvailable.className = 'alert alert-danger';
+    transportIsAvailableMessage.innerText = 'Neither Bluetooth nor serial are available in your browser.';
 }
 
 let file = null;
@@ -87,12 +111,20 @@ mcumgr.onMessage(({ op, group, id, data, length }) => {
                         imagesHTML += `<div class="image ${image.active ? 'active' : 'standby'}">`;
                         imagesHTML += `<h2>Slot #${image.slot} ${image.active ? 'active' : 'standby'}</h2>`;
                         imagesHTML += '<table>';
-                        const hashStr = Array.from(image.hash).map(byte => byte.toString(16).padStart(2, '0')).join('');
                         imagesHTML += `<tr><th>Version</th><td>v${image.version}</td></tr>`;
-                        imagesHTML += `<tr><th>Bootable</th><td>${image.bootable}</td></tr>`;
-                        imagesHTML += `<tr><th>Confirmed</th><td>${image.confirmed}</td></tr>`;
-                        imagesHTML += `<tr><th>Pending</th><td>${image.pending}</td></tr>`;
-                        imagesHTML += `<tr><th>Hash</th><td>${hashStr}</td></tr>`;
+                        if (image.bootable !== undefined) {
+                            imagesHTML += `<tr><th>Bootable</th><td>${image.bootable}</td></tr>`;
+                        }
+                        if (image.confirmed !== undefined) {
+                            imagesHTML += `<tr><th>Confirmed</th><td>${image.confirmed}</td></tr>`;
+                        }
+                        if (image.pending !== undefined) {
+                            imagesHTML += `<tr><th>Pending</th><td>${image.pending}</td></tr>`;
+                        }
+                        if (image.hash !== undefined) {
+                            const hashStr = Array.from(image.hash).map(byte => byte.toString(16).padStart(2, '0')).join('');
+                            imagesHTML += `<tr><th>Hash</th><td>${hashStr}</td></tr>`;
+                        }
                         imagesHTML += '</table>';
                         imagesHTML += '</div>';
                     });
@@ -152,12 +184,16 @@ fileUpload.addEventListener('click', event => {
     }
 });
 
-connectButton.addEventListener('click', async () => {
+connectButtonBluetooth.addEventListener('click', async () => {
     let filters = null;
     if (deviceNameInput.value) {
         filters = [{ namePrefix: deviceNameInput.value }];
     };
-    await mcumgr.connect(filters);
+    await mcumgr.connect("bluetooth", filters);
+});
+
+connectButtonSerial.addEventListener('click', async () => {
+    await mcumgr.connect("serial");
 });
 
 disconnectButton.addEventListener('click', async () => {
@@ -191,4 +227,6 @@ confirmButton.addEventListener('click', async () => {
     if (images.length > 0 && images[0].confirmed === false) {
         await mcumgr.cmdImageConfirm(images[0].hash);
     }
+});
+
 });

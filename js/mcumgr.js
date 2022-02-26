@@ -33,24 +33,55 @@ const IMG_MGMT_ID_CORELIST = 3;
 const IMG_MGMT_ID_CORELOAD = 4;
 const IMG_MGMT_ID_ERASE = 5;
 
-class MCUManager {
+class MCUTransport {
     constructor(di = {}) {
+        this._logger = di.logger || { info: console.log, error: console.error };
+        this._userRequestedDisconnect = false;
+    }
+    onConnecting(callback) {
+        this._connectingCallback = callback;
+        return this;
+    }
+    onConnect(callback) {
+        this._connectCallback = callback;
+        return this;
+    }
+    onDisconnect(callback) {
+        this._disconnectCallback = callback;
+        return this;
+    }
+    onRawMessage(callback) {
+        this._rawMessageCallback = callback;
+        return this;
+    }
+    disconnect() {
+        this._userRequestedDisconnect = true;
+    }
+    async _connected() {
+        if (this._connectCallback) await this._connectCallback();
+    }
+    async _disconnected() {
+        this._logger.info('Disconnected.');
+        if (this._disconnectCallback) this._disconnectCallback();
+        this._userRequestedDisconnect = false;
+    }
+    _connecting() {
+        if (this._connectingCallback) this._connectingCallback();
+    }
+    _rawMessage(message) {
+        if (this._rawMessageCallback) this._rawMessageCallback(message)
+    }
+}
+
+class MCUTransportBluetooth extends MCUTransport {
+    constructor(di = {}) {
+        super(di)
         this.SERVICE_UUID = '8d53dc1d-1db7-4cd3-868b-8a527460aa84';
         this.CHARACTERISTIC_UUID = 'da2e7828-fbce-4e01-ae9e-261174997c48';
-        this._mtu = 140;
         this._device = null;
         this._service = null;
         this._characteristic = null;
-        this._connectCallback = null;
-        this._connectingCallback = null;
-        this._disconnectCallback = null;
-        this._messageCallback = null;
-        this._imageUploadProgressCallback = null;
-        this._uploadIsInProgress = false;
         this._buffer = new Uint8Array();
-        this._logger = di.logger || { info: console.log, error: console.error };
-        this._seq = 0;
-        this._userRequestedDisconnect = false;
     }
     async _requestDevice(filters) {
         const params = {
@@ -86,7 +117,7 @@ class MCUManager {
     _connect() {
         setTimeout(async () => {
             try {
-                if (this._connectingCallback) this._connectingCallback();
+                this._connecting();
                 const server = await this._device.gatt.connect();
                 this._logger.info(`Server connected.`);
                 this._service = await server.getPrimaryService(this.SERVICE_UUID);
@@ -95,9 +126,6 @@ class MCUManager {
                 this._characteristic.addEventListener('characteristicvaluechanged', this._notification.bind(this));
                 await this._characteristic.startNotifications();
                 await this._connected();
-                if (this._uploadIsInProgress) {
-                    this._uploadNext();
-                }
             } catch (error) {
                 this._logger.error(error);
                 await this._disconnected();
@@ -105,9 +133,397 @@ class MCUManager {
         }, 1000);
     }
     disconnect() {
-        this._userRequestedDisconnect = true;
+        super.disconnect();
         return this._device.gatt.disconnect();
     }
+    async _disconnected() {
+        super._disconnected()
+        this._device = null;
+        this._service = null;
+        this._characteristic = null;
+    }
+    async sendMessage(data) {
+        return await this._characteristic.writeValueWithoutResponse(data);
+    }
+    _notification(event) {
+        // console.log('message received');
+        const message = new Uint8Array(event.target.value.buffer);
+        // console.log(message);
+        // console.log('<'  + [...message].map(x => x.toString(16).padStart(2, '0')).join(' '));
+        this._buffer = new Uint8Array([...this._buffer, ...message]);
+        const messageLength = this._buffer[2] * 256 + this._buffer[3];
+        if (this._buffer.length < messageLength + 8) return;
+        this._rawMessage(this._buffer.slice(0, messageLength + 8));
+        this._buffer = this._buffer.slice(messageLength + 8);
+    }
+    get name() {
+        return this._device && this._device.name;
+    }
+}
+
+/**
+ * Transformer that expects Uint8Array chunks as input and outputs
+ * Uint8Arrays of lines delimited by 0x0A (\n), including the
+ * terminating newline.
+ * 
+ * The mcumgr spec says nothing about carriage returns (\r), but at
+ * least one implementation terminates its lines with \n\r, so we
+ * must be careful to properly trim all line endings.
+ */
+ class LineTransformer {
+    constructor() {
+        this._chunks = [];
+        this._length = 0;
+    }
+
+    transform(chunk, controller) {
+        // Handle lines ended by this chunk
+        let index = chunk.indexOf(0x0A);
+        let start = 0;
+        while (index != -1) {
+            // Complete a line using previously stored chunks and the
+            // start of this chunk
+            const lineBuffer = new Uint8Array(this._length + index + 1);
+            let offset = 0;
+            for (const storedChunk of this._chunks) {
+                lineBuffer.set(storedChunk, offset);
+                offset += storedChunk.length;
+            }
+            lineBuffer.set(chunk.subarray(start, index+1), offset)
+            // Trim carriage returns at the beginning or end of the line
+            let trimmedStart = 0;
+            let trimmedEnd = lineBuffer.length;
+            for (var i=0; i < lineBuffer.length; i++) {
+                if (lineBuffer[i] == 0x0D) {
+                    trimmedStart++;
+                } else {
+                    break;
+                }
+            }
+            for (var i=lineBuffer.length - 1; i >= 0; i--) {
+                if (lineBuffer[i] == 0x0D) {
+                    trimmedEnd--;
+                } else {
+                    break;
+                }
+            }
+            // Output the trimmed line for downstream processing
+            if (trimmedStart != 0 || trimmedEnd != lineBuffer.length) {
+                controller.enqueue(lineBuffer.slice(trimmedStart, trimmedEnd));
+            } else {
+                controller.enqueue(lineBuffer);
+            }
+            // Clear stored chunks and keep searching
+            this._chunks = []
+            this._length = 0
+
+            // Continue searching this chunk for more lines
+            start = index + 1
+            index = chunk.indexOf(0x0A, start)
+        }
+
+        // Store any remaining bytes from the chunk for later lines
+        if (start == 0) {
+            // No newline in this chunk at all
+            this._chunks.push(chunk)
+            this._length += chunk.length
+        } else if (start < chunk.length) {
+            // At least one byte remaining after processing newlines
+            this._chunks.push(chunk.slice(start))
+            this._length += chunk.length - start
+        }
+    }
+}
+
+/**
+ * Port of from Zephyr's crc16_itu_t()
+ *
+ * @param number seed - 16-bit CRC seed value 
+ * @param Array data - array-like sequence of 8-bit data values
+ * @returns Checksum of data using polynomial 0x1021
+ */
+function crc16ITUT(seed, data) {
+    seed &= 0xFFFF;
+    for (const byte of data) {
+        seed = ((seed >> 8) | (seed << 8)) & 0xFFFF;
+        seed ^= (byte & 0xFF);
+        seed ^= (seed & 0xFF) >> 4;
+        seed = seed ^ ((seed << 12) & 0xFFFF);
+        seed ^= (seed & 0xFF) << 5;
+    }
+    return seed;
+}
+
+/**
+ * Transformer that expects complete lines as Uint8Arrays as input,
+ * extracts the lines that contain mcumgr frames, reassembles them
+ * and outputs complete mcumgr packets
+ */
+class ConsoleDeframerTransformer {
+    constructor() {
+        this._frameBodies = [];
+        this._numDecodedBytes = 0;
+        this._numExpectedBytes = 0;
+    }
+
+    transform(chunk, controller) {
+        if (chunk.length < 7) {
+            // Need at least the frame header, base64-encoded body,
+            // and newline
+            return;
+        }
+        let newPacket = false;
+        if (chunk[0] == 0x06 && chunk[1] == 0x09) {
+            // Initial frame of a new packet
+            if (this._numExpectedBytes != 0) {
+                // console.log(`Discarding partial packet due to new start frame`);
+            }
+            // Discard any existing state
+            this._frameBodies = [];
+            this._numDecodedBytes = 0;
+            this._numExpectedBytes = 0;
+            newPacket = true;
+        } else if (chunk[0] == 0x04 && chunk[1] == 0x14) {
+            // Continuation frame of an existing packet
+            if (this._numDecodedBytes == this._numExpectedBytes) {
+                // We don't have the beginning of this packet
+                // Discard continuation frames until we get a new packet
+                // console.log(`Discarding continuation frame without start frame`);
+                return;
+            }
+        } else {
+            // Not an mcumgr frame
+            // console.log(`Discarding unframed line`);
+            return;
+        }
+        // Decode the frame body from base64
+        const frameBodyBase64 = String.fromCharCode.apply(null, chunk.subarray(2, chunk.length - 1));
+        const frameBodyString = atob(frameBodyBase64);
+        const frameBody = new Uint8Array(frameBodyString.length);
+        for (let i=0; i < frameBodyString.length; i++) {
+            frameBody[i] = frameBodyString.charCodeAt(i);
+        }
+        if (newPacket) {
+            const view = new DataView(frameBody.buffer);
+            // Read the number of decoded bytes expected, excluding the
+            // 16-bit length, but including the 16-bit CRC.
+            const packetLength = view.getUint16(0, false);
+            // Overall, we expect 2 bytes for the packet length plus the
+            // self-reported packet length.
+            this._numExpectedBytes = packetLength + 2;
+            this._numDecodedBytes = frameBody.length;
+            this._frameBodies.push(frameBody)
+        } else {
+            // Append the frame body for reassembly
+            this._frameBodies.push(frameBody)
+            this._numDecodedBytes += frameBody.length
+        }
+        // Check if we have enough data to reassemble the packet
+        if (this._numDecodedBytes == this._numExpectedBytes) {
+            // Merge all of the frame bodies together into the whole packet
+            // plus the packet length header and CRC16 trailer
+            const packetBuffer = new Uint8Array(this._numDecodedBytes);
+            let offset = 0;
+            for (const body of this._frameBodies) {
+                packetBuffer.set(body, offset);
+                offset += body.length;
+            }
+            const view = new DataView(packetBuffer.buffer);
+            const embeddedCrc16 = view.getUint16(packetBuffer.length - 2, false);
+            const packet = packetBuffer.subarray(2, packetBuffer.length - 2);
+            const calculatedCrc16 = crc16ITUT(0x0000, packet)
+            if (calculatedCrc16 != embeddedCrc16) {
+                // TODO: log a warning or something
+                // console.log(`CRC mismatch - expected ${embeddedCrc16}, got ${calculatedCrc16}`);
+            } else {
+                // Output the packet body
+                controller.enqueue(packetBuffer.subarray(2, packetBuffer.length - 2))
+            }
+            // Reset state
+            this._frameBodies = [];
+            this._numDecodedBytes = 0;
+            this._numExpectedBytes = 0;
+        } else if (this._numDecodedBytes > this._numExpectedBytes) {
+            // Got too many bytes; discard and start over
+            // console.log(`Expected ${this._numExpectedBytes} bytes, but got ${this._numDecodedBytes}`);
+            // TODO: log a warning or something
+            this._frameBodies = [];
+            this._numDecodedBytes = 0;
+            this._numExpectedBytes = 0;
+        }
+    }
+}
+
+class MCUTransportSerial extends MCUTransport{
+    constructor(di = {}) {
+        super(di)
+        this._port = null;
+        this._maxFrameSize = 127;
+        // Account for the bytes needed for the frame header and newline
+        const maxBase64Len = this._maxFrameSize - 3;
+        // Take into account the 4 output bytes / 3 input bytes base64 ratio 
+        this._maxBodyBytesPerFrame = Math.floor(maxBase64Len / 4) * 3;
+    }
+
+    async connect(filters) {
+        try {
+            this._port = await navigator.serial.requestPort(filters);
+            this._logger.info(`Connecting to device ${this.name}...`);
+            navigator.serial.addEventListener('disconnect', async event => {
+                this._logger.info(event);
+                if (!this._userRequestedDisconnect) {
+                    this._logger.info('Trying to reconnect');
+                    this._connect(1000);
+                } else {
+                    this._disconnected();
+                }
+            });
+            this._connect(0);
+        } catch (error) {
+            this._logger.error(error);
+            await this._disconnected();
+            return;
+        }
+    }
+    _connect(timeout) {
+        setTimeout(async () => {
+            try {
+                this._connecting();
+                const options = {
+                    baudRate: 115200
+                };
+                await this._port.open(options);
+                this._logger.info(`Port opened.`);
+                this._inputStream = new TransformStream(new LineTransformer())
+                this._inputStreamClosed = this._port.readable.pipeTo(this._inputStream.writable);
+                this._reader = this._inputStream.readable
+                    .pipeThrough(new TransformStream(new ConsoleDeframerTransformer()))
+                    .getReader()
+                this._readIncoming(this._reader)
+                this._writer = this._port.writable.getWriter();
+                await this._connected();
+            } catch (error) {
+                this._logger.error(error);
+                await this._disconnected();
+            }
+        }, timeout);
+    }
+    async _disconnected() {
+        super._disconnected()
+        this._device = null;
+        this._service = null;
+        this._characteristic = null;
+    }
+    disconnect() {
+        super.disconnect();
+        if (this._reader) {
+            this._reader.cancel();
+        }
+        if (this._writer) {
+            this._writer.close();
+        }
+        if (this._port) {
+            this._port.close();
+        }
+        return this._port.close();
+    }
+    get name() {
+        return "Serial";
+    }
+    async sendMessage(data) {
+        const packetLength = data.byteLength + 2;
+        const calculatedCrc16 = crc16ITUT(0x0000, data);
+        // Concatenate the length, packet, and CRC16 together
+        const body = new Uint8Array(packetLength + 2);
+        const view = new DataView(body.buffer)
+        view.setUint16(0, packetLength, false);
+        body.set(data, 2);
+        view.setUint16(packetLength, calculatedCrc16, false);
+        // Split into frames no larger than the maximum frame size
+        const numFramesNeeded = Math.ceil(body.length / this._maxBodyBytesPerFrame);
+        const frames = [];
+        for (var i=0; i < numFramesNeeded; i++) {
+            const offset = i * this._maxBodyBytesPerFrame;
+            const bodyBytesRemaining = body.length - offset;
+            const numBytesToEncode = Math.min(bodyBytesRemaining, this._maxBodyBytesPerFrame);
+            const encodedString = btoa(String.fromCharCode.apply(null, body.subarray(offset, offset + numBytesToEncode)));
+            const frame = new Uint8Array(3 + encodedString.length);
+            if (i == 0) {
+                // First frame is a packet start frame
+                frame[0] = 0x06;
+                frame[1] = 0x09;
+                frame[frame.length - 1] = 0x0A;
+            } else {
+                // Subsequent frames are continuation frames
+                frame[0] = 0x04;
+                frame[1] = 0x14;
+            }
+            // Add the base64-encoded frame body
+            for (var j=0; j < encodedString.length; j++) {
+                frame[2+j] = encodedString.charCodeAt(j);
+            }
+            // Add the newline terminator
+            frame[frame.length - 1] = 0x0A;
+            // Add the frame to the list of frames to send
+            frames.push(frame)
+        }
+
+        // Write each frame
+        for (const frame of frames) {
+            await this._writer.write(frame);
+        }
+    }
+    async _readIncoming(reader) {
+        while (true) {
+            const {value, done} = await this._reader.read();
+            if (value) {
+                this._rawMessage(value);
+            }
+            if (done) {
+                break;
+            }
+        }
+    }
+}
+
+class MCUManager {
+    constructor(di = {}) {
+        this._mtu = 140;
+        this._connectCallback = null;
+        this._connectingCallback = null;
+        this._disconnectCallback = null;
+        this._messageCallback = null;
+        this._imageUploadProgressCallback = null;
+        this._uploadIsInProgress = false;
+        
+        this._logger = di.logger || { info: console.log, error: console.error };
+        this._seq = 0;
+        this._transport = null;
+    }
+    async connect(type, filters) {
+        switch (type) {
+            case 'bluetooth':
+                this._transport = new MCUTransportBluetooth();
+                break;
+            case 'serial':
+                this._transport = new MCUTransportSerial();
+                break;
+        }
+
+        if (this._transport) {
+            this._transport.onConnect(async () => await this._connected());
+            this._transport.onDisconnect(() => this._disconnected());
+            this._transport.onConnecting(() => this._connecting());
+            this._transport.onRawMessage((message) => this._processMessage(message));
+            await this._transport.connect(filters);
+        }
+    }
+    disconnect() {
+        if (this._transport) {
+            return this._transport.disconnect();
+        }
+    }
+    
     onConnecting(callback) {
         this._connectingCallback = callback;
         return this;
@@ -134,18 +550,19 @@ class MCUManager {
     }
     async _connected() {
         if (this._connectCallback) this._connectCallback();
+        if (this._uploadIsInProgress) {
+            this._uploadNext();
+        }
     }
-    async _disconnected() {
-        this._logger.info('Disconnected.');
+    _disconnected() {
         if (this._disconnectCallback) this._disconnectCallback();
-        this._device = null;
-        this._service = null;
-        this._characteristic = null;
-        this._uploadIsInProgress = false;
-        this._userRequestedDisconnect = false;
     }
+    _connecting() {
+        if (this._connectingCallback) this._connectingCallback();
+    }
+    
     get name() {
-        return this._device && this._device.name;
+        return this._transport && this._transport.name;
     }
     async _sendMessage(op, group, id, data) {
         const _flags = 0;
@@ -159,19 +576,8 @@ class MCUManager {
         const group_hi = group >> 8;
         const message = [op, _flags, length_hi, length_lo, group_hi, group_lo, this._seq, id, ...encodedData];
         // console.log('>'  + message.map(x => x.toString(16).padStart(2, '0')).join(' '));
-        await this._characteristic.writeValueWithoutResponse(Uint8Array.from(message));
+        await this._transport.sendMessage(Uint8Array.from(message));
         this._seq = (this._seq + 1) % 256;
-    }
-    _notification(event) {
-        // console.log('message received');
-        const message = new Uint8Array(event.target.value.buffer);
-        // console.log(message);
-        // console.log('<'  + [...message].map(x => x.toString(16).padStart(2, '0')).join(' '));
-        this._buffer = new Uint8Array([...this._buffer, ...message]);
-        const messageLength = this._buffer[2] * 256 + this._buffer[3];
-        if (this._buffer.length < messageLength + 8) return;
-        this._processMessage(this._buffer.slice(0, messageLength + 8));
-        this._buffer = this._buffer.slice(messageLength + 8);
     }
     _processMessage(message) {
         const [op, _flags, length_hi, length_lo, group_hi, group_lo, _seq, id] = message;
