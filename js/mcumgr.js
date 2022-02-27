@@ -363,6 +363,8 @@ class MCUTransportSerial extends MCUTransport{
         const maxBase64Len = this._maxFrameSize - 3;
         // Take into account the 4 output bytes / 3 input bytes base64 ratio 
         this._maxBodyBytesPerFrame = Math.floor(maxBase64Len / 4) * 3;
+        // Keep track of whether we know the target's input line buffer state
+        this._flushed = false;
     }
 
     async connect(filters) {
@@ -419,6 +421,7 @@ class MCUTransportSerial extends MCUTransport{
         this._messageStreamClosed = null;
         this._reader = null;
         this._writer = null;
+        this._flushed = false;
     }
     async disconnect() {
         await super.disconnect();
@@ -474,6 +477,13 @@ class MCUTransportSerial extends MCUTransport{
             frame[frame.length - 1] = 0x0A;
             // Add the frame to the list of frames to send
             frames.push(frame)
+        }
+
+        if (!this._flushed) {
+            // Flush the target's line buffer if this is the first time
+            // we're writing to it since opening the serial connection.
+            await this._writer.write(new Uint8Array([0x0D, 0x0A]));
+            this._flushed = true;
         }
 
         // Write each frame
