@@ -702,10 +702,6 @@ class MCUManager {
             throw new Error('Invalid image (wrong image size)');
         }
 
-        // check flags is 0x00000000
-        if (view.getUint32(16, true) != 0x00000000) {
-            throw new Error('Invalid image (wrong flags)');
-        }
 
         const version = `${view.getUint8(20)}.${view.getUint8(21)}.${view.getUint16(22, true)}+${view.getUint32(24,true)}`;
         info.version = version;
