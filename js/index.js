@@ -107,31 +107,38 @@ mcumgr.onMessage(({ op, group, id, data, length }) => {
                 case IMG_MGMT_ID_STATE:
                     images = data.images;
                     let imagesHTML = '';
-                    images.forEach(image => {
-                        imagesHTML += `<div class="image ${image.active ? 'active' : 'standby'}">`;
-                        imagesHTML += `<h2>Slot #${image.slot} ${image.active ? 'active' : 'standby'}</h2>`;
-                        imagesHTML += '<table>';
-                        imagesHTML += `<tr><th>Version</th><td>v${image.version}</td></tr>`;
-                        if (image.bootable !== undefined) {
-                            imagesHTML += `<tr><th>Bootable</th><td>${image.bootable}</td></tr>`;
-                        }
-                        if (image.confirmed !== undefined) {
-                            imagesHTML += `<tr><th>Confirmed</th><td>${image.confirmed}</td></tr>`;
-                        }
-                        if (image.pending !== undefined) {
-                            imagesHTML += `<tr><th>Pending</th><td>${image.pending}</td></tr>`;
-                        }
-                        if (image.hash !== undefined) {
-                            const hashStr = Array.from(image.hash).map(byte => byte.toString(16).padStart(2, '0')).join('');
-                            imagesHTML += `<tr><th>Hash</th><td>${hashStr}</td></tr>`;
-                        }
-                        imagesHTML += '</table>';
-                        imagesHTML += '</div>';
-                    });
+                    if (images) {
+                        images.forEach(image => {
+                            imagesHTML += `<div class="image ${image.active ? 'active' : 'standby'}">`;
+                            imagesHTML += `<h2>Slot #${image.slot} ${image.active ? 'active' : 'standby'}</h2>`;
+                            imagesHTML += '<table>';
+                            imagesHTML += `<tr><th>Version</th><td>v${image.version}</td></tr>`;
+                            if (image.bootable !== undefined) {
+                                imagesHTML += `<tr><th>Bootable</th><td>${image.bootable}</td></tr>`;
+                            }
+                            if (image.confirmed !== undefined) {
+                                imagesHTML += `<tr><th>Confirmed</th><td>${image.confirmed}</td></tr>`;
+                            }
+                            if (image.pending !== undefined) {
+                                imagesHTML += `<tr><th>Pending</th><td>${image.pending}</td></tr>`;
+                            }
+                            if (image.hash !== undefined) {
+                                const hashStr = Array.from(image.hash).map(byte => byte.toString(16).padStart(2, '0')).join('');
+                                imagesHTML += `<tr><th>Hash</th><td>${hashStr}</td></tr>`;
+                            }
+                            imagesHTML += '</table>';
+                            imagesHTML += '</div>';
+                        });
+                    }
                     imageList.innerHTML = imagesHTML;
 
-                    testButton.disabled = !(data.images.length > 1 && data.images[1].pending === false);
-                    confirmButton.disabled = !(data.images.length > 0 && data.images[0].confirmed === false);
+                    if (images) {
+                        testButton.disabled = !(data.images.length > 1 && data.images[1].pending === false);
+                        confirmButton.disabled = !(data.images.length > 0 && data.images[0].confirmed === false);
+                    } else {
+                        testButton.disabled = true;
+                        confirmButton.disabled = true;
+                    }
                     break;
             }
             break;
