@@ -707,7 +707,7 @@ class MCUManager {
             throw new Error('Invalid image (wrong flags)');
         }
 
-        const version = `${view.getUint8(20)}.${view.getUint8(21)}.${view.getUint16(22, true)}`;
+        const version = `${view.getUint8(20)}.${view.getUint8(21)}.${view.getUint16(22, true)}+${view.getUint32(24,true)}`;
         info.version = version;
 
         info.hash = [...new Uint8Array(await this._hash(image.slice(0, imageSize + 32)))].map(b => b.toString(16).padStart(2, '0')).join('');
