@@ -107,7 +107,7 @@ mcumgr.onMessage(({ op, group, id, data, length }) => {
                 case IMG_MGMT_ID_STATE:
                     images = data.images;
                     let imagesHTML = '';
-                    if (images) {
+                    if (images && images.length > 0) {
                         images.forEach(image => {
                             imagesHTML += `<div class="image ${image.active ? 'active' : 'standby'}">`;
                             imagesHTML += `<h2>Slot #${image.slot} ${image.active ? 'active' : 'standby'}</h2>`;
@@ -129,6 +129,8 @@ mcumgr.onMessage(({ op, group, id, data, length }) => {
                             imagesHTML += '</table>';
                             imagesHTML += '</div>';
                         });
+                    } else {
+                        imagesHTML = `<div class="alert alert-warning" role="alert">Device has no on-board firmware images</div>`
                     }
                     imageList.innerHTML = imagesHTML;
 
