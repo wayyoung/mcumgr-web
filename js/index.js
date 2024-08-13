@@ -202,7 +202,8 @@ connectButtonBluetooth.addEventListener('click', async () => {
 });
 
 connectButtonSerial.addEventListener('click', async () => {
-    await mcumgr.connect("serial");
+    const filter = [{ usbVendorId: 0x18d1, usbProductId: 0xffff }];
+    await mcumgr.connect("serial", filter);
 });
 
 disconnectButton.addEventListener('click', async () => {

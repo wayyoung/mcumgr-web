@@ -533,7 +533,7 @@ class MCUManager {
             this._transport.onDisconnect(() => this._disconnected());
             this._transport.onConnecting(() => this._connecting());
             this._transport.onRawMessage((message) => this._processMessage(message));
-            await this._transport.connect(filters);
+            await this._transport.connect({filters: filters});
         }
     }
     disconnect() {
