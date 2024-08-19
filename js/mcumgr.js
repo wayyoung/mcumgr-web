@@ -24,6 +24,7 @@ const OS_MGMT_ID_TASKSTAT = 2;
 const OS_MGMT_ID_MPSTAT = 3;
 const OS_MGMT_ID_DATETIME_STR = 4;
 const OS_MGMT_ID_RESET = 5;
+const OS_MGMT_ID_FORCE_RECOVERY_MODE = 99;
 
 // Image group
 const IMG_MGMT_ID_STATE = 0;
@@ -32,6 +33,11 @@ const IMG_MGMT_ID_FILE = 2;
 const IMG_MGMT_ID_CORELIST = 3;
 const IMG_MGMT_ID_CORELOAD = 4;
 const IMG_MGMT_ID_ERASE = 5;
+
+const RECONNECT_DELAY = 500;
+const RECONNECT_TIMEOUT = 10000;
+
+const filters = [{ usbVendorId: 0x18d1, usbProductId: 0xffff }];
 
 class MCUTransport {
     constructor(di = {}) {
@@ -42,7 +48,7 @@ class MCUTransport {
         this._connectingCallback = callback;
         return this;
     }
-    onConnect(callback) {
+        onConnect(callback) {
         this._connectCallback = callback;
         return this;
     }
@@ -127,6 +133,9 @@ class MCUTransportBluetooth extends MCUTransport {
                 await this._characteristic.startNotifications();
                 await this._connected();
             } catch (error) {
+                if (this._transport) {
+                    this._transport.reconnecting = false;
+                }
                 this._logger.error(error);
                 await this._disconnected();
             }
@@ -365,6 +374,8 @@ class MCUTransportSerial extends MCUTransport{
         this._maxBodyBytesPerFrame = Math.floor(maxBase64Len / 4) * 3;
         // Keep track of whether we know the target's input line buffer state
         this._flushed = false;
+        this._reconnect_msecs = 0;
+        this.reconnecting = false;
     }
 
     async connect(filters) {
@@ -374,14 +385,10 @@ class MCUTransportSerial extends MCUTransport{
             if (this._port) {
                 this._port.addEventListener('disconnect', async event => {
                     this._logger.info(event);
-                    if (!this._userRequestedDisconnect) {
-                        this._logger.info('Trying to reconnect');
-                        this._connect(1000);
-                    } else {
-                        this._disconnected();
-                    }
+                    this._disconnected();
                 });
             }
+            this._reconnect_msecs = 0;
             this._connect(0);
         } catch (error) {
             this._logger.error(error);
@@ -389,6 +396,51 @@ class MCUTransportSerial extends MCUTransport{
             return;
         }
     }
+ 
+    async reconnect(filters) {
+        setTimeout(async () => {
+            try {
+                this._userRequestedDisconnect = true;
+                this._reconnect_msecs += RECONNECT_DELAY;
+                if (this._reconnect_msecs >= RECONNECT_TIMEOUT) {
+                    this._reconnect_msecs = 0;
+                    throw new Error('reconnect timeout reach!!');
+                }
+                this._connecting();
+                try{
+                    await this.disconnect(true);
+                }catch(e){
+                }
+                
+                this._port = await navigator.serial.getPorts(filters).then( ports =>{
+                    return Promise.resolve(ports[0]);
+                });
+
+                if (this._port) {
+                    this._port.addEventListener('disconnect', async event => {
+                        this._logger.info(event);
+                        if (!this._userRequestedDisconnect) {
+                            this._logger.info('Trying to reconnect');
+                            this.reconnect(filters);
+                        } else {
+                            this._disconnected();
+                        }
+                    });
+                } else {
+                    this.reconnect(filters);
+                    return;  
+                }
+                console.log("port reconnected: ", this._port);
+
+                this._connect(0);
+            } catch (error) {
+                this.reconnecting = false;
+                this._logger.error(error);
+                await this._disconnected();
+            }
+        }, RECONNECT_DELAY);
+    }
+
     _connect(timeout) {
         setTimeout(async () => {
             try {
@@ -406,14 +458,25 @@ class MCUTransportSerial extends MCUTransport{
                 this._readIncoming(this._reader)
                 this._writer = this._port.writable.getWriter();
                 await this._connected();
+                this.reconnecting = false;
+                
             } catch (error) {
+                if (this.reconnecting) {
+                    // console.log("failed to _connect but will reconnect");
+                    this.reconnect(filters);
+                    return;
+                }
                 this._logger.error(error);
                 await this._disconnected();
             }
         }, timeout);
     }
     async _disconnected() {
-        super._disconnected()
+        
+        console.log("MCUTransportSerial _disconnected. reconnecting:", this.reconnecting);
+        if (! this.reconnecting) {
+            super._disconnected()
+        }
         this._port = null;
         this._inputStream = null;
         this._inputStreamClosed = null;
@@ -518,7 +581,7 @@ class MCUManager {
         this._seq = 0;
         this._transport = null;
     }
-    async connect(type, filters) {
+        async connect(type, filters) {
         switch (type) {
             case 'bluetooth':
                 this._transport = new MCUTransportBluetooth();
@@ -539,6 +602,12 @@ class MCUManager {
     disconnect() {
         if (this._transport) {
             return this._transport.disconnect();
+        }
+    }
+    reconnect(filters) {
+        if (this._transport) {
+            this._transport.reconnecting = true;
+            return this._transport.reconnect(filters);
         }
     }
     
@@ -614,6 +683,9 @@ class MCUManager {
     }
     smpEcho(message) {
         return this._sendMessage(MGMT_OP_WRITE, MGMT_GROUP_ID_OS, OS_MGMT_ID_ECHO, { d: message });
+    }
+    cmdForceRecoveryMode() {
+        return this._sendMessage(MGMT_OP_READ, MGMT_GROUP_ID_OS, OS_MGMT_ID_FORCE_RECOVERY_MODE, {});
     }
     cmdImageState() {
         return this._sendMessage(MGMT_OP_READ, MGMT_GROUP_ID_IMAGE, IMG_MGMT_ID_STATE, {});

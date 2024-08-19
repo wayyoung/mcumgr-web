@@ -64,7 +64,7 @@ deviceNameInput.value = localStorage.getItem('deviceName');
 deviceNameInput.addEventListener('change', () => {
     localStorage.setItem('deviceName', deviceNameInput.value);
 });
-
+const filters = [{ usbVendorId: 0x18d1, usbProductId: 0xffff }];
 const mcumgr = new MCUManager();
 mcumgr.onConnecting(() => {
     console.log('Connecting...');
@@ -72,27 +72,45 @@ mcumgr.onConnecting(() => {
     screens.connected.style.display = 'none';
     screens.connecting.style.display = 'block';
 });
-mcumgr.onConnect(() => {
+
+function _recovery_mode_connected() {
     deviceName.innerText = mcumgr.name;
     screens.connecting.style.display = 'none';
     screens.initial.style.display = 'none';
     screens.connected.style.display = 'block';
     imageList.innerHTML = '';
     mcumgr.cmdImageState();
+}
+
+mcumgr.onConnect(() => {
+    mcumgr.cmdForceRecoveryMode();
 });
+var mgmt_start = 0;
 mcumgr.onDisconnect(() => {
     deviceName.innerText = 'Connect your device';
     screens.connecting.style.display = 'none';
     screens.connected.style.display = 'none';
     screens.initial.style.display = 'block';
+    mgmt_start = 0
 });
-
 mcumgr.onMessage(({ op, group, id, data, length }) => {
     switch (group) {
         case MGMT_GROUP_ID_OS:
             switch (id) {
                 case OS_MGMT_ID_ECHO:
                     alert(data.r);
+                    break;
+                case OS_MGMT_ID_FORCE_RECOVERY_MODE:
+                    if (mgmt_start == 0) {
+                        mgmt_start = Date.now();
+                    }
+                    if (data.rc != 0 && (Date.now() - mgmt_start) <= 10000) {
+                        console.log("not in recovery mode. rc: ", data.rc);
+                        mcumgr.reconnect(filters); 
+                    }else{
+                        mgmt_start = 0;
+                        _recovery_mode_connected();
+                    }
                     break;
                 case OS_MGMT_ID_TASKSTAT:
                     console.table(data.tasks);
@@ -202,8 +220,7 @@ connectButtonBluetooth.addEventListener('click', async () => {
 });
 
 connectButtonSerial.addEventListener('click', async () => {
-    const filter = [{ usbVendorId: 0x18d1, usbProductId: 0xffff }];
-    await mcumgr.connect("serial", filter);
+    await mcumgr.connect("serial", filters);
 });
 
 disconnectButton.addEventListener('click', async () => {
