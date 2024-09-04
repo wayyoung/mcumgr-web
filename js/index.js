@@ -5,7 +5,7 @@ const screens = {
     connecting: document.getElementById('connecting-screen'),
     connected: document.getElementById('connected-screen')
 };
-
+const uploadSlotId = document.getElementById('upload-slot-id');
 const deviceName = document.getElementById('device-name');
 const deviceNameInput = document.getElementById('device-name-input');
 const connectButtonBluetooth = document.getElementById('button-connect-bluetooth');
@@ -128,9 +128,12 @@ mcumgr.onMessage(({ op, group, id, data, length }) => {
                     if (images && images.length > 0) {
                         images.forEach(image => {
                             imagesHTML += `<div class="image ${image.active ? 'active' : 'standby'}">`;
-                            imagesHTML += `<h2>Slot #${image.slot} ${image.active ? 'active' : 'standby'}</h2>`;
+                            imagesHTML += `<h2>Slot ${image.slot} ${image.active ? 'active' : 'standby'}</h2>`;
                             imagesHTML += '<table>';
                             imagesHTML += `<tr><th>Version</th><td>v${image.version}</td></tr>`;
+                            if (image.label !== undefined) {
+                                imagesHTML += `<tr><th>Label</th><td>${image.label}</td></tr>`;
+                            }
                             if (image.bootable !== undefined) {
                                 imagesHTML += `<tr><th>Bootable</th><td>${image.bootable}</td></tr>`;
                             }
@@ -169,6 +172,11 @@ mcumgr.onMessage(({ op, group, id, data, length }) => {
 });
 
 mcumgr.onImageUploadProgress(({ percentage }) => {
+    if (percentage < 0) 
+    {
+        fileStatus.innerText = `Error!! rc = ${percentage}`;
+        return;
+    }
     fileStatus.innerText = `Uploading... ${percentage}%`;
 });
 
@@ -205,9 +213,10 @@ fileImage.addEventListener('change', () => {
 });
 fileUpload.addEventListener('click', event => {
     fileUpload.disabled = true;
+    sid = Number(uploadSlotId.value);
     event.stopPropagation();
     if (file && fileData) {
-        mcumgr.cmdUpload(fileData);
+        mcumgr.cmdUpload(fileData, sid);
     }
 });
 

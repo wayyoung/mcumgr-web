@@ -307,7 +307,8 @@ class ConsoleDeframerTransformer {
         }
         // Decode the frame body from base64
         const frameBodyBase64 = String.fromCharCode.apply(null, chunk.subarray(2, chunk.length - 1));
-        const frameBodyString = atob(frameBodyBase64);
+        const frameBodyBase64x = frameBodyBase64.replace(/\0/g, '');
+        const frameBodyString = atob(frameBodyBase64x);
         const frameBody = new Uint8Array(frameBodyString.length);
         for (let i=0; i < frameBodyString.length; i++) {
             frameBody[i] = frameBodyString.charCodeAt(i);
@@ -671,9 +672,19 @@ class MCUManager {
         const data = CBOR.decode(message.slice(8).buffer);
         const length = length_hi * 256 + length_lo;
         const group = group_hi * 256 + group_lo;
-        if (group === MGMT_GROUP_ID_IMAGE && id === IMG_MGMT_ID_UPLOAD && data.rc === 0 && data.off) {
-            this._uploadOffset = data.off;            
-            this._uploadNext();
+
+        if (group === MGMT_GROUP_ID_IMAGE && id === IMG_MGMT_ID_UPLOAD) {
+            // console.log("data.rc",data.rc);
+            if (data.rc === 0 && data.off)
+            {
+                this._uploadOffset = data.off;            
+                this._uploadNext();
+            }
+            else if( data.rc != 0 )
+            { 
+                this._imageUploadProgressCallback({percentage: -(data.rc)});
+            }
+
             return;
         }
         if (this._messageCallback) this._messageCallback({ op, group, id, data, length });
@@ -710,7 +721,7 @@ class MCUManager {
         }
 
         const nmpOverhead = 8;
-        const message = { data: new Uint8Array(), off: this._uploadOffset };
+        const message = { data: new Uint8Array(), off: this._uploadOffset, image: Number(this._uploadSlot)};
         if (this._uploadOffset === 0) {
             message.len = this._uploadImage.byteLength;
             message.sha = new Uint8Array(await this._hash(this._uploadImage));
@@ -734,8 +745,8 @@ class MCUManager {
 
         this._uploadOffset = 0;
         this._uploadImage = image;
-        this._uploadSlot = slot;
-
+                this._uploadSlot = slot;
+        
         this._uploadNext();
     }
     async imageInfo(image) {
