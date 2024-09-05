@@ -745,7 +745,7 @@ class MCUManager {
 
         this._uploadOffset = 0;
         this._uploadImage = image;
-                this._uploadSlot = slot;
+        this._uploadSlot = slot;
         
         this._uploadNext();
     }
@@ -773,9 +773,9 @@ class MCUManager {
         const headerSize = view[8] + view[9] * 2**8;
 
         // check protected TLV area size is 0
-        if (view.getUint16(10, true)!== 0x0000) {
-            throw new Error('Invalid image (wrong protected TLV area size)');
-        }
+        // if (view.getUint16(10, true)!== 0x0000) {
+        //     throw new Error('Invalid image (wrong protected TLV area size)');
+        // }
 
         const imageSize = view.getUint32(12, true);
         info.imageSize = imageSize;

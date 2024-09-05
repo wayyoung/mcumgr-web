@@ -143,9 +143,22 @@ mcumgr.onMessage(({ op, group, id, data, length }) => {
                             if (image.pending !== undefined) {
                                 imagesHTML += `<tr><th>Pending</th><td>${image.pending}</td></tr>`;
                             }
+                            if (image.size !== undefined) {
+                                imagesHTML += `<tr><th>Size</th><td>${image.size}</td></tr>`;
+                            }
+                            if (image.crc !== undefined) {
+                                imagesHTML += `<tr><th>CRC</th><td>${image.crc}</td></tr>`;
+                            }
                             if (image.hash !== undefined) {
                                 const hashStr = Array.from(image.hash).map(byte => byte.toString(16).padStart(2, '0')).join('');
                                 imagesHTML += `<tr><th>Hash</th><td>${hashStr}</td></tr>`;
+                            }
+                            if (image.chip !== undefined) {
+                                if (image.chip == 2) {
+                                    imagesHTML += `<tr><th>Chip</th><td>CPS8200</td></tr>`;
+                                } else {
+                                    imagesHTML += `<tr><th>Chip</th><td>[${image.chip}]</td></tr>`;
+                                }
                             }
                             imagesHTML += '</table>';
                             imagesHTML += '</div>';
@@ -177,11 +190,11 @@ mcumgr.onImageUploadProgress(({ percentage }) => {
         fileStatus.innerText = `Error!! rc = ${percentage}`;
         return;
     }
-    fileStatus.innerText = `Uploading... ${percentage}%`;
+    fileStatus.innerText = `Downloading... ${percentage}%`;
 });
 
 mcumgr.onImageUploadFinished(() => {
-    fileStatus.innerText = 'Upload complete';
+    fileStatus.innerText = 'Download complete';
     fileInfo.innerHTML = '';
     fileImage.value = '';
     mcumgr.cmdImageState();
