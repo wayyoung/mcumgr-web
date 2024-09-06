@@ -147,7 +147,7 @@ mcumgr.onMessage(({ op, group, id, data, length }) => {
                                 imagesHTML += `<tr><th>Size</th><td>${image.size}</td></tr>`;
                             }
                             if (image.crc !== undefined) {
-                                imagesHTML += `<tr><th>CRC</th><td>${image.crc}</td></tr>`;
+                                imagesHTML += `<tr><th>CRC</th><td>0x${image.crc.toString(16)}</td></tr>`;
                             }
                             if (image.hash !== undefined) {
                                 const hashStr = Array.from(image.hash).map(byte => byte.toString(16).padStart(2, '0')).join('');
