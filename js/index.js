@@ -28,14 +28,14 @@ const connectBlockBluetooth = document.getElementById('connect-block-bluetooth')
 const connectBlockSerial = document.getElementById('connect-block-serial');
 
 let bluetoothAvailable = false
-if (navigator && navigator.bluetooth) {
-    bluetoothAvailable = await navigator.bluetooth.getAvailability();
-}
+// if (navigator && navigator.bluetooth) {
+//     bluetoothAvailable = await navigator.bluetooth.getAvailability();
+// }
 
-let serialAvailable = false;
-if (navigator && navigator.serial) {
-    serialAvailable = true;
-}
+let serialAvailable = true;
+// if (navigator && navigator.serial) {
+//     serialAvailable = true;
+// }
 
 if (bluetoothAvailable && serialAvailable) {
     transportIsAvailableMessage.innerText = 'Bluetooth and serial are available in your browser.';
@@ -47,7 +47,7 @@ if (bluetoothAvailable && serialAvailable) {
         transportIsAvailableMessage.innerText = `Bluetooth is available in your browser, but serial is not.`;
         connectBlockBluetooth.style.display = 'block';
     } else {
-        transportIsAvailableMessage.innerText = `Serial is available in your browser, but Bluetooth is not.`;
+        transportIsAvailableMessage.innerText = `Serial support is required.`;
         connectBlockSerial.style.display = 'block';
     }
     transportIsAvailable.className = 'alert alert-warning';
