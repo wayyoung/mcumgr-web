@@ -189,7 +189,7 @@ class MCUTransportBluetooth extends MCUTransport {
         // Handle lines ended by this chunk
         let index = chunk.indexOf(0x0A);
         let start = 0;
-        while (index != -1) {
+                while (index != -1) {
             // Complete a line using previously stored chunks and the
             // start of this chunk
             const lineBuffer = new Uint8Array(this._length + index + 1);
@@ -241,7 +241,7 @@ class MCUTransportBluetooth extends MCUTransport {
             this._chunks.push(chunk.slice(start))
             this._length += chunk.length - start
         }
-    }
+            }
 }
 
 /**
@@ -282,7 +282,7 @@ class ConsoleDeframerTransformer {
             return;
         }
         let newPacket = false;
-        if (chunk[0] == 0x06 && chunk[1] == 0x09) {
+                if (chunk[0] == 0x06 && chunk[1] == 0x09) {
             // Initial frame of a new packet
             if (this._numExpectedBytes != 0) {
                 // console.log(`Discarding partial packet due to new start frame`);
@@ -305,7 +305,7 @@ class ConsoleDeframerTransformer {
             // console.log(`Discarding unframed line`);
             return;
         }
-        // Decode the frame body from base64
+                // Decode the frame body from base64
         const frameBodyBase64 = String.fromCharCode.apply(null, chunk.subarray(2, chunk.length - 1));
         const frameBodyBase64x = frameBodyBase64.replace(/\0/g, '');
         const frameBodyString = atob(frameBodyBase64x);
@@ -381,12 +381,13 @@ class MCUTransportSerial extends MCUTransport{
 
     async connect(filters) {
         try {
-            this._port = await navigator.serial.requestPort(filters);
+            //this._port = await navigator.serial.requestPort(filters);
+            this._port = await usb_tty_serial.requestPort(filters)
             this._logger.info(`Connecting to device ${this.name}...`);
             if (this._port) {
                 this._port.addEventListener('disconnect', async event => {
-                    this._logger.info(event);
-                    this._disconnected();
+                this._logger.info(event);
+                this._disconnected();
                 });
             }
             this._reconnect_msecs = 0;
@@ -412,8 +413,8 @@ class MCUTransportSerial extends MCUTransport{
                     await this.disconnect(true);
                 }catch(e){
                 }
-                
-                this._port = await navigator.serial.getPorts(filters).then( ports =>{
+                //this._port = await navigator.serial.getPorts(filters).then( ports =>{
+                this._port = await usb_tty_serial.getPorts(filters).then( ports =>{
                     return Promise.resolve(ports[0]);
                 });
 
@@ -557,12 +558,17 @@ class MCUTransportSerial extends MCUTransport{
     }
     async _readIncoming(reader) {
         while (true) {
-            const {value, done} = await this._reader.read();
-            if (value) {
-                this._rawMessage(value);
-            }
-            if (done) {
-                break;
+            try{
+                const {value, done} = await this._reader.read();
+                if (value) {
+                    this._rawMessage(value);
+                }
+                if (done) {
+                    break;
+                }
+            } catch(error) {
+                console.log(error.toString());
+                break;   
             }
         }
     }
