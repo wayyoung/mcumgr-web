@@ -105,7 +105,7 @@ mcumgr.onMessage(({ op, group, id, data, length }) => {
                     if (mgmt_start == 0) {
                         mgmt_start = Date.now();
                     }
-                    if (data.rc != 0 && (Date.now() - mgmt_start) <= 5000) {
+                    if (data.rc != 0 && (Date.now() - mgmt_start) <= RECONNECT_TIMEOUT) {
                         console.log("not in recovery mode. rc: ", data.rc);
                         mcumgr.reconnect(filters); 
                     }else{

@@ -481,7 +481,6 @@ class Serial {
         const device = await navigator.usb.requestDevice({ 'filters': usbFilters });
         const port = new SerialPort(device, polyfillOptions);
         const devices = await navigator.usb.getDevices();
-        console.log(`available devices: ${devices.length}`);
         return port;
     }
     /**

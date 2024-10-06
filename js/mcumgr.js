@@ -35,7 +35,7 @@ const IMG_MGMT_ID_CORELOAD = 4;
 const IMG_MGMT_ID_ERASE = 5;
 
 const RECONNECT_DELAY = 500;
-const RECONNECT_TIMEOUT = 10000;
+const RECONNECT_TIMEOUT = 5000;
 
 const filters = [{ usbVendorId: 0x18d1, usbProductId: 0xffff }];
 
@@ -392,7 +392,11 @@ class MCUTransportSerial extends MCUTransport {
                 this._port = await usb_tty_serial.getPorts(filters).then(ports => {
                     return Promise.resolve(ports[0]);
                 });
-            } else {
+                
+            } 
+
+            if(!this._port){
+                this._reconnecting = false;
                 this._port = await usb_tty_serial.requestPort(filters)
             }
 
@@ -426,7 +430,10 @@ class MCUTransportSerial extends MCUTransport {
                 this._reconnect_msecs += RECONNECT_DELAY;
                 if (this._reconnect_msecs >= RECONNECT_TIMEOUT) {
                     this._reconnect_msecs = 0;
-                    throw new Error('reconnect timeout reach!!');
+                    console.log('reconnect timeout reach!!');
+                    await this.disconnect().catch(reason=>{});
+                    return Promise.resolve();
+                    
                 }
 
                 this._connecting();
