@@ -48,7 +48,7 @@ class MCUTransport {
         this._connectingCallback = callback;
         return this;
     }
-        onConnect(callback) {
+    onConnect(callback) {
         this._connectCallback = callback;
         return this;
     }
@@ -63,7 +63,7 @@ class MCUTransport {
     async disconnect() {
         this._userRequestedDisconnect = true;
     }
-    async _connected() {
+    async _onConnect() {
         if (this._connectCallback) await this._connectCallback();
     }
     async _disconnected() {
@@ -131,7 +131,7 @@ class MCUTransportBluetooth extends MCUTransport {
                 this._characteristic = await this._service.getCharacteristic(this.CHARACTERISTIC_UUID);
                 this._characteristic.addEventListener('characteristicvaluechanged', this._notification.bind(this));
                 await this._characteristic.startNotifications();
-                await this._connected();
+                await this._onConnect();
             } catch (error) {
                 if (this._transport) {
                     this._transport.reconnecting = false;
@@ -179,7 +179,7 @@ class MCUTransportBluetooth extends MCUTransport {
  * least one implementation terminates its lines with \n\r, so we
  * must be careful to properly trim all line endings.
  */
- class LineTransformer {
+class LineTransformer {
     constructor() {
         this._chunks = [];
         this._length = 0;
@@ -189,7 +189,7 @@ class MCUTransportBluetooth extends MCUTransport {
         // Handle lines ended by this chunk
         let index = chunk.indexOf(0x0A);
         let start = 0;
-                while (index != -1) {
+        while (index != -1) {
             // Complete a line using previously stored chunks and the
             // start of this chunk
             const lineBuffer = new Uint8Array(this._length + index + 1);
@@ -198,18 +198,18 @@ class MCUTransportBluetooth extends MCUTransport {
                 lineBuffer.set(storedChunk, offset);
                 offset += storedChunk.length;
             }
-            lineBuffer.set(chunk.subarray(start, index+1), offset)
+            lineBuffer.set(chunk.subarray(start, index + 1), offset)
             // Trim carriage returns at the beginning or end of the line
             let trimmedStart = 0;
             let trimmedEnd = lineBuffer.length;
-            for (var i=0; i < lineBuffer.length; i++) {
+            for (var i = 0; i < lineBuffer.length; i++) {
                 if (lineBuffer[i] == 0x0D) {
                     trimmedStart++;
                 } else {
                     break;
                 }
             }
-            for (var i=lineBuffer.length - 1; i >= 0; i--) {
+            for (var i = lineBuffer.length - 1; i >= 0; i--) {
                 if (lineBuffer[i] == 0x0D) {
                     trimmedEnd--;
                 } else {
@@ -241,7 +241,7 @@ class MCUTransportBluetooth extends MCUTransport {
             this._chunks.push(chunk.slice(start))
             this._length += chunk.length - start
         }
-            }
+    }
 }
 
 /**
@@ -282,7 +282,7 @@ class ConsoleDeframerTransformer {
             return;
         }
         let newPacket = false;
-                if (chunk[0] == 0x06 && chunk[1] == 0x09) {
+        if (chunk[0] == 0x06 && chunk[1] == 0x09) {
             // Initial frame of a new packet
             if (this._numExpectedBytes != 0) {
                 // console.log(`Discarding partial packet due to new start frame`);
@@ -305,12 +305,12 @@ class ConsoleDeframerTransformer {
             // console.log(`Discarding unframed line`);
             return;
         }
-                // Decode the frame body from base64
+        // Decode the frame body from base64
         const frameBodyBase64 = String.fromCharCode.apply(null, chunk.subarray(2, chunk.length - 1));
         const frameBodyBase64x = frameBodyBase64.replace(/\0/g, '');
         const frameBodyString = atob(frameBodyBase64x);
         const frameBody = new Uint8Array(frameBodyString.length);
-        for (let i=0; i < frameBodyString.length; i++) {
+        for (let i = 0; i < frameBodyString.length; i++) {
             frameBody[i] = frameBodyString.charCodeAt(i);
         }
         if (newPacket) {
@@ -364,7 +364,7 @@ class ConsoleDeframerTransformer {
     }
 }
 
-class MCUTransportSerial extends MCUTransport{
+class MCUTransportSerial extends MCUTransport {
     constructor(di = {}) {
         super(di)
         this._port = null;
@@ -376,107 +376,101 @@ class MCUTransportSerial extends MCUTransport{
         // Keep track of whether we know the target's input line buffer state
         this._flushed = false;
         this._reconnect_msecs = 0;
-        this.reconnecting = false;
+        this._reconnecting = false;
+        this._reconnect_count = 0;
+        this.disc_id = 0;
+        console.log("new MCUTransportSerial");
+
     }
+
 
     async connect(filters) {
         try {
             //this._port = await navigator.serial.requestPort(filters);
-            this._port = await usb_tty_serial.requestPort(filters)
-            this._logger.info(`Connecting to device ${this.name}...`);
-            if (this._port) {
-                this._port.addEventListener('disconnect', async event => {
-                this._logger.info(event);
-                this._disconnected();
+            this._logger.info(`connecting to device ${this.name}, reconnecting: ${this._reconnecting}`);
+            if (this._reconnecting) {
+                this._port = await usb_tty_serial.getPorts(filters).then(ports => {
+                    return Promise.resolve(ports[0]);
                 });
+            } else {
+                this._port = await usb_tty_serial.requestPort(filters)
             }
-            this._reconnect_msecs = 0;
-            this._connect(0);
+
+            if (this._port) {
+                const disconnecting_handler = async (event) => {
+                    console.log(`disc ${this.disc_id}`)
+                    this._logger.info(event);
+                    await this.disconnect().catch(reason=>{});
+                    console.log(`disc ${this.disc_id++}`)
+                }
+                this._port.addEventListener('disconnect', disconnecting_handler);
+                this._reconnect_msecs = 0;
+                this._connect(0);
+                return Promise.resolve();
+            }
+
         } catch (error) {
             this._logger.error(error);
-            await this._disconnected();
-            return;
+            await this.disconnect().catch(reason=>{});
         }
+        return Promise.reject(`Failed to connect device: ${this.name}`)
     }
- 
-    async reconnect(filters) {
+
+    async _start_reconnection(filters) {
         setTimeout(async () => {
+            if (!this._reconnecting) {
+                return Promise.resolve();
+            }
+            console.log(`reconnect_count:${this._reconnect_count++}`);
             try {
-                this._userRequestedDisconnect = true;
                 this._reconnect_msecs += RECONNECT_DELAY;
                 if (this._reconnect_msecs >= RECONNECT_TIMEOUT) {
                     this._reconnect_msecs = 0;
                     throw new Error('reconnect timeout reach!!');
                 }
+
                 this._connecting();
-                try{
-                    await this.disconnect(true);
-                }catch(e){
-                }
-                //this._port = await navigator.serial.getPorts(filters).then( ports =>{
-                this._port = await usb_tty_serial.getPorts(filters).then( ports =>{
-                    return Promise.resolve(ports[0]);
-                });
 
-                if (this._port) {
-                    this._port.addEventListener('disconnect', async event => {
-                        this._logger.info(event);
-                        if (!this._userRequestedDisconnect) {
-                            this._logger.info('Trying to reconnect');
-                            this.reconnect(filters);
-                        } else {
-                            this._disconnected();
-                        }
-                    });
-                } else {
-                    this.reconnect(filters);
-                    return;  
-                }
-                console.log("port reconnected: ", this._port);
+                console.log(`disconnect() in reconnect()`)
+                await this.disconnect().catch(reason => console.log(reason));
+                await this.connect(filters);
 
-                this._connect(0);
             } catch (error) {
-                this.reconnecting = false;
                 this._logger.error(error);
-                await this._disconnected();
+                await this.disconnect().catch(reason=>{});
             }
+            this._start_reconnection(filters);
         }, RECONNECT_DELAY);
     }
 
     _connect(timeout) {
         setTimeout(async () => {
             try {
-                this._connecting();
+                this._connecting(); /* change the UI to connecting*/
                 const options = {
                     baudRate: 115200
                 };
                 await this._port.open(options);
-                this._logger.info(`Port opened.`);
+                this._logger.info(`port opened for _connect, reconnecting: ${this._reconnecting}`);
                 this._inputStream = new TransformStream(new LineTransformer())
                 this._inputStreamClosed = this._port.readable.pipeTo(this._inputStream.writable);
                 this._messageStream = new TransformStream(new ConsoleDeframerTransformer());
                 this._messageStreamClosed = this._inputStream.readable.pipeTo(this._messageStream.writable);
                 this._reader = this._messageStream.readable.getReader();
-                this._readIncoming(this._reader)
                 this._writer = this._port.writable.getWriter();
-                await this._connected();
-                this.reconnecting = false;
-                
+
+                this._readIncoming().catch(reason => console.log(`_readIncoming error!! ${reason}`)); /* start the reading async */
+                this._onConnect(); /* trigger the mcumgr onConnect*/
             } catch (error) {
-                if (this.reconnecting) {
-                    // console.log("failed to _connect but will reconnect");
-                    this.reconnect(filters);
-                    return;
-                }
                 this._logger.error(error);
-                await this._disconnected();
+                await this.disconnect().catch(reason=>{});
             }
         }, timeout);
     }
     async _disconnected() {
-        
-        console.log("MCUTransportSerial _disconnected. reconnecting:", this.reconnecting);
-        if (! this.reconnecting) {
+
+        console.log("MCUTransportSerial _disconnected. reconnecting:", this._reconnecting);
+        if (!this._reconnecting) {
             super._disconnected()
         }
         this._port = null;
@@ -491,17 +485,18 @@ class MCUTransportSerial extends MCUTransport{
     async disconnect() {
         await super.disconnect();
         if (this._reader) {
-            this._reader.cancel();
-            await this._inputStreamClosed.catch(reason => {});
-            await this._messageStreamClosed.catch(reason => {});
+            this._reader.cancel().catch(reason => { });
+            await this._inputStreamClosed.catch(reason => { });
+            await this._messageStreamClosed.catch(reason => { });
         }
         if (this._writer) {
-            await this._writer.close();
+            await this._writer.abort().catch(reason => { console.log(reason); });
+            this._writer.releaseLock();
         }
         if (this._port) {
-            await this._port.close();
+            await this._port.close().catch(reason => { console.log(reason); });
         }
-        await this._disconnected();
+        await this._disconnected().catch(reason => { });
     }
     get name() {
         return "Serial";
@@ -518,7 +513,7 @@ class MCUTransportSerial extends MCUTransport{
         // Split into frames no larger than the maximum frame size
         const numFramesNeeded = Math.ceil(body.length / this._maxBodyBytesPerFrame);
         const frames = [];
-        for (var i=0; i < numFramesNeeded; i++) {
+        for (var i = 0; i < numFramesNeeded; i++) {
             const offset = i * this._maxBodyBytesPerFrame;
             const bodyBytesRemaining = body.length - offset;
             const numBytesToEncode = Math.min(bodyBytesRemaining, this._maxBodyBytesPerFrame);
@@ -535,8 +530,8 @@ class MCUTransportSerial extends MCUTransport{
                 frame[1] = 0x14;
             }
             // Add the base64-encoded frame body
-            for (var j=0; j < encodedString.length; j++) {
-                frame[2+j] = encodedString.charCodeAt(j);
+            for (var j = 0; j < encodedString.length; j++) {
+                frame[2 + j] = encodedString.charCodeAt(j);
             }
             // Add the newline terminator
             frame[frame.length - 1] = 0x0A;
@@ -556,20 +551,17 @@ class MCUTransportSerial extends MCUTransport{
             await this._writer.write(frame);
         }
     }
-    async _readIncoming(reader) {
+    async _readIncoming() {
         while (true) {
-            try{
-                const {value, done} = await this._reader.read();
-                if (value) {
-                    this._rawMessage(value);
-                }
-                if (done) {
-                    break;
-                }
-            } catch(error) {
-                console.log(error.toString());
-                break;   
+
+            const { value, done } = await this._reader.read();
+            if (value) {
+                this._rawMessage(value);
             }
+            if (done) {
+                break;
+            }
+
         }
     }
 }
@@ -583,28 +575,30 @@ class MCUManager {
         this._messageCallback = null;
         this._imageUploadProgressCallback = null;
         this._uploadIsInProgress = false;
-        
+
         this._logger = di.logger || { info: console.log, error: console.error };
         this._seq = 0;
         this._transport = null;
     }
-        async connect(type, filters) {
-        switch (type) {
-            case 'bluetooth':
-                this._transport = new MCUTransportBluetooth();
-                break;
-            case 'serial':
-                this._transport = new MCUTransportSerial();
-                break;
+    async connect(type, filters) {
+
+        if (!this._transport) {
+            switch (type) {
+                case 'bluetooth':
+                    this._transport = new MCUTransportBluetooth();
+                    break;
+                case 'serial':
+                    this._transport = new MCUTransportSerial();
+                    break;
+            }
         }
 
-        if (this._transport) {
-            this._transport.onConnect(async () => await this._connected());
-            this._transport.onDisconnect(() => this._disconnected());
-            this._transport.onConnecting(() => this._connecting());
-            this._transport.onRawMessage((message) => this._processMessage(message));
-            await this._transport.connect({filters: filters});
-        }
+        this._transport.onConnect(async () => await this._connected());
+        this._transport.onDisconnect(() => this._disconnected());
+        this._transport.onConnecting(() => this._connecting());
+        this._transport.onRawMessage((message) => this._processMessage(message));
+        await this._transport.connect({ filters: filters });
+
     }
     disconnect() {
         if (this._transport) {
@@ -613,11 +607,11 @@ class MCUManager {
     }
     reconnect(filters) {
         if (this._transport) {
-            this._transport.reconnecting = true;
-            return this._transport.reconnect(filters);
+            this._transport._reconnecting = true;
+            return this._transport._start_reconnection(filters);
         }
     }
-    
+
     onConnecting(callback) {
         this._connectingCallback = callback;
         return this;
@@ -654,7 +648,13 @@ class MCUManager {
     _connecting() {
         if (this._connectingCallback) this._connectingCallback();
     }
-    
+    onRecoveryModeConnected() {
+        console.log("onRecoveryModeConnected");
+        this._transport._reconnecting = false;
+        this._transport._reconnect_msecs = 0;
+        this._transport._reconnect_count = 0;
+    }
+
     get name() {
         return this._transport && this._transport.name;
     }
@@ -681,14 +681,12 @@ class MCUManager {
 
         if (group === MGMT_GROUP_ID_IMAGE && id === IMG_MGMT_ID_UPLOAD) {
             // console.log("data.rc",data.rc);
-            if (data.rc === 0 && data.off)
-            {
-                this._uploadOffset = data.off;            
+            if (data.rc === 0 && data.off) {
+                this._uploadOffset = data.off;
                 this._uploadNext();
             }
-            else if( data.rc != 0 )
-            { 
-                this._imageUploadProgressCallback({percentage: -(data.rc)});
+            else if (data.rc != 0) {
+                this._imageUploadProgressCallback({ percentage: -(data.rc) });
             }
 
             return;
@@ -702,7 +700,12 @@ class MCUManager {
         return this._sendMessage(MGMT_OP_WRITE, MGMT_GROUP_ID_OS, OS_MGMT_ID_ECHO, { d: message });
     }
     cmdForceRecoveryMode() {
-        return this._sendMessage(MGMT_OP_READ, MGMT_GROUP_ID_OS, OS_MGMT_ID_FORCE_RECOVERY_MODE, {});
+        try {
+            return this._sendMessage(MGMT_OP_READ, MGMT_GROUP_ID_OS, OS_MGMT_ID_FORCE_RECOVERY_MODE, {});
+        } catch (error) {
+
+        }
+
     }
     cmdImageState() {
         return this._sendMessage(MGMT_OP_READ, MGMT_GROUP_ID_IMAGE, IMG_MGMT_ID_STATE, {});
@@ -727,7 +730,7 @@ class MCUManager {
         }
 
         const nmpOverhead = 8;
-        const message = { data: new Uint8Array(), off: this._uploadOffset, image: Number(this._uploadSlot)};
+        const message = { data: new Uint8Array(), off: this._uploadOffset, image: Number(this._uploadSlot) };
         if (this._uploadOffset === 0) {
             message.len = this._uploadImage.byteLength;
             message.sha = new Uint8Array(await this._hash(this._uploadImage));
@@ -744,7 +747,7 @@ class MCUManager {
     }
     async cmdUpload(image, slot = 0) {
         if (this._uploadIsInProgress) {
-            this._logger.error('Upload is already in progress.');
+            console.log('Upload is already in progress.');
             return;
         }
         this._uploadIsInProgress = true;
@@ -752,7 +755,7 @@ class MCUManager {
         this._uploadOffset = 0;
         this._uploadImage = image;
         this._uploadSlot = slot;
-        
+
         this._uploadNext();
     }
     async imageInfo(image) {
@@ -776,7 +779,7 @@ class MCUManager {
             throw new Error('Invalid image (wrong load address)');
         }
 
-        const headerSize = view[8] + view[9] * 2**8;
+        const headerSize = view[8] + view[9] * 2 ** 8;
 
         // check protected TLV area size is 0
         // if (view.getUint16(10, true)!== 0x0000) {
@@ -792,7 +795,7 @@ class MCUManager {
         }
 
 
-        const version = `${view.getUint8(20)}.${view.getUint8(21)}.${view.getUint16(22, true)}+${view.getUint32(24,true)}`;
+        const version = `${view.getUint8(20)}.${view.getUint8(21)}.${view.getUint16(22, true)}+${view.getUint32(24, true)}`;
         info.version = version;
 
         info.hash = [...new Uint8Array(await this._hash(image.slice(0, imageSize + 32)))].map(b => b.toString(16).padStart(2, '0')).join('');

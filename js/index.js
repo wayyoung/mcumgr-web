@@ -79,6 +79,7 @@ function _recovery_mode_connected() {
     screens.initial.style.display = 'none';
     screens.connected.style.display = 'block';
     imageList.innerHTML = '';
+    mcumgr.onRecoveryModeConnected();
     mcumgr.cmdImageState();
 }
 
@@ -104,7 +105,7 @@ mcumgr.onMessage(({ op, group, id, data, length }) => {
                     if (mgmt_start == 0) {
                         mgmt_start = Date.now();
                     }
-                    if (data.rc != 0 && (Date.now() - mgmt_start) <= 10000) {
+                    if (data.rc != 0 && (Date.now() - mgmt_start) <= 5000) {
                         console.log("not in recovery mode. rc: ", data.rc);
                         mcumgr.reconnect(filters); 
                     }else{

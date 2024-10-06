@@ -113,7 +113,7 @@ class UsbEndpointUnderlyingSource {
             var retryc_ = 2;
             try {
                 while (datalen_ == 0 && retryc_ > 0) {
-                    const result = await this.device_.transferIn(this.endpoint_.endpointNumber, chunkSize);
+                    const result = await this.device_.transferIn(this.endpoint_.endpointNumber, chunkSize).catch(reason =>{console.log("transferIn failed!")});
                     if (result.status != 'ok') {
                         controller.error(`USB error: ${result.status}`);
                         this.onError_();
