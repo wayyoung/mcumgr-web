@@ -480,6 +480,8 @@ class Serial {
         }
         const device = await navigator.usb.requestDevice({ 'filters': usbFilters });
         const port = new SerialPort(device, polyfillOptions);
+        const devices = await navigator.usb.getDevices();
+        console.log(`available devices: ${devices.length}`);
         return port;
     }
     /**
@@ -503,7 +505,6 @@ class Serial {
                 // Skip unrecognized port.
             }
         });
-        alert(`getting port!!2 ${ports.length}`);
         return ports;
     }
 
