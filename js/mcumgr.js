@@ -402,7 +402,6 @@ class MCUTransportSerial extends MCUTransport {
                 choose the USB again to continue.
             */
             if(!this._port){
-                this._reconnecting = false;
                 this._port = await usb_tty_serial.requestPort(filters)
             }
 
