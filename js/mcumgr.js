@@ -395,6 +395,12 @@ class MCUTransportSerial extends MCUTransport {
                 
             } 
 
+            /*
+                This is due to that the behavior to re-acquire the same disonnected USB is different on android phone and the laptops.
+                On Android phone the same USB can't be acquire again with the getPorts() method(which will not popup a confirm dialog)
+                if it was disconnected but on laptops it is OK. Here calls the requestPort() again which popup a dialog to let user
+                choose the USB again to continue.
+            */
             if(!this._port){
                 this._reconnecting = false;
                 this._port = await usb_tty_serial.requestPort(filters)
@@ -425,11 +431,19 @@ class MCUTransportSerial extends MCUTransport {
             if (!this._reconnecting) {
                 return Promise.resolve();
             }
-            console.log(`reconnect_count:${this._reconnect_count++}`);
+
+            this._reconnect_count++;
+            console.log(`reconnect_count:${this._reconnect_count}`);
+
             try {
-                this._reconnect_msecs += RECONNECT_DELAY;
-                if (this._reconnect_msecs >= RECONNECT_TIMEOUT) {
+                let current_ms = new Date().getTime();
+                if(this._reconnect_msecs == 0) {
+                    this._reconnect_msecs = current_ms;
+                }
+                if (current_ms >= (this._reconnect_msecs + RECONNECT_TIMEOUT)) {
                     this._reconnect_msecs = 0;
+                    this._reconnecting = false;
+                    this._reconnect_count = 0;
                     console.log('reconnect timeout reach!!');
                     await this.disconnect().catch(reason=>{});
                     return Promise.resolve();
