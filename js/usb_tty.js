@@ -456,6 +456,7 @@ class Serial {
      * @return {Promise<SerialPort>}
      */
     async requestPort(options, polyfillOptions) {
+
         polyfillOptions = Object.assign(Object.assign({}, kDefaultPolyfillOptions), polyfillOptions);
         const usbFilters = [];
         if (options && options.filters) {
@@ -490,9 +491,11 @@ class Serial {
      * ports.
      */
     async getPorts(polyfillOptions) {
+        alert("getting port!!0");
         polyfillOptions = Object.assign(Object.assign({}, kDefaultPolyfillOptions), polyfillOptions);
         const devices = await navigator.usb.getDevices();
         const ports = [];
+        alert("getting port!!1");
         devices.forEach((device) => {
             try {
                 const port = new SerialPort(device, polyfillOptions);
@@ -502,6 +505,7 @@ class Serial {
                 // Skip unrecognized port.
             }
         });
+        alert("getting port!!2");
         return ports;
     }
 
