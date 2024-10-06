@@ -47,7 +47,7 @@ if (bluetoothAvailable && serialAvailable) {
         transportIsAvailableMessage.innerText = `Bluetooth is available in your browser, but serial is not.`;
         connectBlockBluetooth.style.display = 'block';
     } else {
-        transportIsAvailableMessage.innerText = `Serial support is required.`;
+        transportIsAvailableMessage.innerText = `WebUSB support is required.`;
         connectBlockSerial.style.display = 'block';
     }
     transportIsAvailable.className = 'alert alert-warning';
