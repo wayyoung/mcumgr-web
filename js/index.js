@@ -195,7 +195,7 @@ mcumgr.onImageUploadProgress(({ percentage }) => {
 });
 
 mcumgr.onImageUploadFinished(() => {
-    fileStatus.innerText = 'Download complete';
+    fileStatus.innerText = 'Download completed';
     fileInfo.innerHTML = '';
     fileImage.value = '';
     mcumgr.cmdImageState();
@@ -213,10 +213,10 @@ fileImage.addEventListener('change', () => {
             table += `<tr><th>Version</th><td>v${info.version}</td></tr>`;
             table += `<tr><th>Hash</th><td>${info.hash}</td></tr>`;
             table += `<tr><th>File Size</th><td>${fileData.byteLength} bytes</td></tr>`;
-            table += `<tr><th>Size</th><td>${info.imageSize} bytes</td></tr>`;
+            table += `<tr><th>Image Size</th><td>${info.imageSize} bytes</td></tr>`;
             table += `</table>`;
 
-            fileStatus.innerText = 'Ready to upload';
+            fileStatus.innerText = 'Ready to download';
             fileInfo.innerHTML = table;
             fileUpload.disabled = false;
         } catch (e) {
