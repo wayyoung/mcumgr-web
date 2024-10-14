@@ -16,6 +16,7 @@ const MGMT_GROUP_ID_SPLIT = 6;
 const MGMT_GROUP_ID_RUN = 7;
 const MGMT_GROUP_ID_FS = 8;
 const MGMT_GROUP_ID_SHELL = 9;
+const MGMT_GROUP_ID_MGMT_EX = 80;
 
 // OS group
 const OS_MGMT_ID_ECHO = 0;
@@ -33,6 +34,10 @@ const IMG_MGMT_ID_FILE = 2;
 const IMG_MGMT_ID_CORELIST = 3;
 const IMG_MGMT_ID_CORELOAD = 4;
 const IMG_MGMT_ID_ERASE = 5;
+
+// MGMT_EX
+const MGMT_EX_ID_IMG_STATE = 0;
+const MGMT_EX_ID_IMG_WLC_TX_UPDATE = 1;
 
 const RECONNECT_DELAY = 500;
 const RECONNECT_TIMEOUT = 5000;
@@ -594,6 +599,7 @@ class MCUManager {
         this._disconnectCallback = null;
         this._messageCallback = null;
         this._imageUploadProgressCallback = null;
+        this._updateWlcTxFinishedCallback = null;
         this._uploadIsInProgress = false;
 
         this._logger = di.logger || { info: console.log, error: console.error };
@@ -652,6 +658,12 @@ class MCUManager {
         this._imageUploadProgressCallback = callback;
         return this;
     }
+
+    onWlcTxUpdateFinished(callback) {
+        this._wlcTxUpdateFinishedCallback = callback;
+        return this;
+    }
+
     onImageUploadFinished(callback) {
         this._imageUploadFinishedCallback = callback;
         return this;
@@ -710,6 +722,10 @@ class MCUManager {
             }
 
             return;
+        } else if (group === MGMT_GROUP_ID_MGMT_EX && id === MGMT_EX_ID_IMG_WLC_TX_UPDATE) {
+            console.log("data.rc",data.rc);
+            this._wlcTxUpdateFinishedCallback({ rc: -(data.rc) });
+            
         }
         if (this._messageCallback) this._messageCallback({ op, group, id, data, length });
     }
@@ -728,7 +744,11 @@ class MCUManager {
 
     }
     cmdImageState() {
-        return this._sendMessage(MGMT_OP_READ, MGMT_GROUP_ID_IMAGE, IMG_MGMT_ID_STATE, {});
+        return this._sendMessage(MGMT_OP_READ, MGMT_GROUP_ID_MGMT_EX, MGMT_EX_ID_IMG_STATE, {});
+    }
+
+    cmdWlcTxUpdate() {
+        return this._sendMessage(MGMT_OP_WRITE, MGMT_GROUP_ID_MGMT_EX, MGMT_EX_ID_IMG_WLC_TX_UPDATE, {});
     }
     cmdImageErase() {
         return this._sendMessage(MGMT_OP_WRITE, MGMT_GROUP_ID_IMAGE, IMG_MGMT_ID_ERASE, {});
@@ -766,6 +786,7 @@ class MCUManager {
         this._sendMessage(MGMT_OP_WRITE, MGMT_GROUP_ID_IMAGE, IMG_MGMT_ID_UPLOAD, message);
     }
     async cmdUpload(image, slot = 0) {
+        console.log("cmdUpload")
         if (this._uploadIsInProgress) {
             console.log('Upload is already in progress.');
             return;

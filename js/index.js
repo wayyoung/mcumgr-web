@@ -27,6 +27,8 @@ const transportIsAvailableMessage = document.getElementById('transport-is-availa
 const connectBlockBluetooth = document.getElementById('connect-block-bluetooth');
 const connectBlockSerial = document.getElementById('connect-block-serial');
 
+const TX_IC_SLOT_ID = 2;
+
 let bluetoothAvailable = false
 // if (navigator && navigator.bluetooth) {
 //     bluetoothAvailable = await navigator.bluetooth.getAvailability();
@@ -73,18 +75,24 @@ mcumgr.onConnecting(() => {
     screens.connecting.style.display = 'block';
 });
 
-function _recovery_mode_connected() {
+function _recovery_mode_connected(recovery_mode) {
     deviceName.innerText = mcumgr.name;
     screens.connecting.style.display = 'none';
     screens.initial.style.display = 'none';
     screens.connected.style.display = 'block';
     imageList.innerHTML = '';
-    mcumgr.onRecoveryModeConnected();
+    if (recovery_mode) {
+        mcumgr.onRecoveryModeConnected();
+    }
     mcumgr.cmdImageState();
 }
-
+let force_recovery_mode = false;
 mcumgr.onConnect(() => {
-    mcumgr.cmdForceRecoveryMode();
+    if (force_recovery_mode) {
+        mcumgr.cmdForceRecoveryMode();
+    } else {
+        _recovery_mode_connected(false);
+    }
 });
 var mgmt_start = 0;
 mcumgr.onDisconnect(() => {
@@ -110,7 +118,7 @@ mcumgr.onMessage(({ op, group, id, data, length }) => {
                         mcumgr.reconnect(filters); 
                     }else{
                         mgmt_start = 0;
-                        _recovery_mode_connected();
+                        _recovery_mode_connected(true);
                     }
                     break;
                 case OS_MGMT_ID_TASKSTAT:
@@ -125,6 +133,7 @@ mcumgr.onMessage(({ op, group, id, data, length }) => {
             switch (id) {
                 case IMG_MGMT_ID_STATE:
                     images = data.images;
+                    console.log("images.length:",images.length)
                     let imagesHTML = '';
                     if (images && images.length > 0) {
                         images.forEach(image => {
@@ -179,6 +188,65 @@ mcumgr.onMessage(({ op, group, id, data, length }) => {
                     break;
             }
             break;
+            case MGMT_GROUP_ID_MGMT_EX:
+                switch (id) {
+                    case MGMT_EX_ID_IMG_STATE:
+                        images = data.images;
+                        console.log("images.length:",images.length)
+                        let imagesHTML = '';
+                        if (images && images.length > 0) {
+                            images.forEach(image => {
+                                imagesHTML += `<div class="image ${image.active ? 'active' : 'standby'}">`;
+                                imagesHTML += `<h2>Slot ${image.slot} ${image.active ? 'active' : 'standby'}</h2>`;
+                                imagesHTML += '<table>';
+                                imagesHTML += `<tr><th>Version</th><td>v${image.version}</td></tr>`;
+                                if (image.label !== undefined) {
+                                    imagesHTML += `<tr><th>Label</th><td>${image.label}</td></tr>`;
+                                }
+                                if (image.bootable !== undefined) {
+                                    imagesHTML += `<tr><th>Bootable</th><td>${image.bootable}</td></tr>`;
+                                }
+                                if (image.confirmed !== undefined) {
+                                    imagesHTML += `<tr><th>Confirmed</th><td>${image.confirmed}</td></tr>`;
+                                }
+                                if (image.pending !== undefined) {
+                                    imagesHTML += `<tr><th>Pending</th><td>${image.pending}</td></tr>`;
+                                }
+                                if (image.size !== undefined) {
+                                    imagesHTML += `<tr><th>Size</th><td>${image.size}</td></tr>`;
+                                }
+                                if (image.crc !== undefined) {
+                                    imagesHTML += `<tr><th>CRC</th><td>0x${image.crc.toString(16)}</td></tr>`;
+                                }
+                                if (image.hash !== undefined) {
+                                    const hashStr = Array.from(image.hash).map(byte => byte.toString(16).padStart(2, '0')).join('');
+                                    imagesHTML += `<tr><th>Hash</th><td>${hashStr}</td></tr>`;
+                                }
+                                if (image.chip !== undefined) {
+                                    if (image.chip == 2) {
+                                        imagesHTML += `<tr><th>Chip</th><td>CPS8200</td></tr>`;
+                                    } else {
+                                        imagesHTML += `<tr><th>Chip</th><td>[${image.chip}]</td></tr>`;
+                                    }
+                                }
+                                imagesHTML += '</table>';
+                                imagesHTML += '</div>';
+                            });
+                        } else {
+                            imagesHTML = `<div class="alert alert-warning" role="alert">Device has no on-board firmware images</div>`
+                        }
+                        imageList.innerHTML = imagesHTML;
+    
+                        if (images) {
+                            testButton.disabled = !(data.images.length > 1 && data.images[1].pending === false);
+                            confirmButton.disabled = !(data.images.length > 0 && data.images[0].confirmed === false);
+                        } else {
+                            testButton.disabled = true;
+                            confirmButton.disabled = true;
+                        }
+                        break;
+                }
+                break;            
         default:
             console.log('Unknown group');
             break;
@@ -194,11 +262,31 @@ mcumgr.onImageUploadProgress(({ percentage }) => {
     fileStatus.innerText = `Downloading... ${percentage}%`;
 });
 
-mcumgr.onImageUploadFinished(() => {
-    fileStatus.innerText = 'Download completed';
+mcumgr.onWlcTxUpdateFinished(({ rc }) => {
+    if (rc !=0 ) {
+        fileStatus.innerText = `Failed to Update WLC TX IC, rc: ${rc}`;
+    } else {
+        fileStatus.innerText = `Update WLC TX IC Successfully`;
+    }
+
     fileInfo.innerHTML = '';
     fileImage.value = '';
     mcumgr.cmdImageState();
+});
+
+
+mcumgr.onImageUploadFinished(() => {
+    
+    if ( Number(uploadSlotId.value) == TX_IC_SLOT_ID ) {
+        fileStatus.innerText = 'Download completed. Updating WLC TX IC...';
+        mcumgr.cmdWlcTxUpdate();
+    } else {
+        fileStatus.innerText = 'Download completed';
+        fileInfo.innerHTML = '';
+        fileImage.value = '';
+        mcumgr.cmdImageState();
+    }
+    
 });
 
 fileImage.addEventListener('change', () => {
@@ -219,6 +307,7 @@ fileImage.addEventListener('change', () => {
             fileStatus.innerText = 'Ready to download';
             fileInfo.innerHTML = table;
             fileUpload.disabled = false;
+            console.log("file loaded");
         } catch (e) {
             fileInfo.innerHTML = `ERROR: ${e.message}`;
         }
@@ -227,6 +316,7 @@ fileImage.addEventListener('change', () => {
 });
 fileUpload.addEventListener('click', event => {
     fileUpload.disabled = true;
+    console.log("fileUpload disabled");
     sid = Number(uploadSlotId.value);
     event.stopPropagation();
     if (file && fileData) {
