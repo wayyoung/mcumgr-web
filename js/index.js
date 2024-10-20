@@ -66,7 +66,7 @@ deviceNameInput.value = localStorage.getItem('deviceName');
 deviceNameInput.addEventListener('change', () => {
     localStorage.setItem('deviceName', deviceNameInput.value);
 });
-const filters = [{ usbVendorId: 0x18d1, usbProductId: 0xffff }];
+const filters = [{ usbVendorId: 0x18d1, usbProductId: 0x9502 }];
 const mcumgr = new MCUManager();
 mcumgr.onConnecting(() => {
     console.log('Connecting...');

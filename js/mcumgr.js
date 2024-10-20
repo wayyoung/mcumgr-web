@@ -42,7 +42,7 @@ const MGMT_EX_ID_IMG_WLC_TX_UPDATE = 1;
 const RECONNECT_DELAY = 500;
 const RECONNECT_TIMEOUT = 5000;
 
-const filters = [{ usbVendorId: 0x18d1, usbProductId: 0xffff }];
+const filters = [{ usbVendorId: 0x18d1, usbProductId: 0x9502 }];
 
 class MCUTransport {
     constructor(di = {}) {
