@@ -527,7 +527,7 @@ class MCUTransportSerial extends MCUTransport {
         return "Serial";
     }
     async sendMessage(data) {
-        const packetLength = data.byteLength + 2;
+                const packetLength = data.byteLength + 2;
         const calculatedCrc16 = crc16ITUT(0x0000, data);
         // Concatenate the length, packet, and CRC16 together
         const body = new Uint8Array(packetLength + 2);
@@ -593,7 +593,7 @@ class MCUTransportSerial extends MCUTransport {
 
 class MCUManager {
     constructor(di = {}) {
-        this._mtu = 140;
+        this._mtu = 280;
         this._connectCallback = null;
         this._connectingCallback = null;
         this._disconnectCallback = null;

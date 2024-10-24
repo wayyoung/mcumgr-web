@@ -100,6 +100,9 @@ mcumgr.onDisconnect(() => {
     screens.connecting.style.display = 'none';
     screens.connected.style.display = 'none';
     screens.initial.style.display = 'block';
+    fileStatus.innerText = '';
+    fileInfo.innerHTML = '';
+    fileImage.value = '';
     mgmt_start = 0
 });
 mcumgr.onMessage(({ op, group, id, data, length }) => {
